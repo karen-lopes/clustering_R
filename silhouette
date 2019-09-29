@@ -1,0 +1,92 @@
+setwd("~/Estatistica_R")
+
+library(dplyr)
+library(cluster) 
+library(Rtsne) 
+library(ggplot2) 
+library(readr)
+
+Cavedata <- read_csv("~/Estatistica_R/Cavedata.csv")
+View(Cavedata)
+
+# data cleaning
+
+cave_clean <- data.frame(subset(Cavedata, Cavedata$Guano == "y" | Cavedata$BATPOP == "y"))
+glimpse(cave_clean)
+
+cave_clean <- cave_clean  %>%
+  select(Cave, Slope, Area, Lito, PW, WR, Guano, BATPOP)
+
+cave_clean <- data.frame(cave_clean[complete.cases(cave_clean),])
+
+cave_clean$Lito <- factor(cave_clean$Lito)
+cave_clean$PW <- factor(cave_clean$PW)
+cave_clean$WR <- factor(cave_clean$WR)
+cave_clean$Guano <- factor(cave_clean$Guano)
+cave_clean$BATPOP <- factor(cave_clean$BATPOP)
+
+View(cave_clean)
+glimpse(cave_clean)
+
+# Remover nome da caverna antes do clustering
+# Calculo das distancias, GOWER
+
+gower_dist <- daisy(cave_clean[, -1],
+                    metric = "gower",
+                    type = list(logratio = 3))
+
+summary(gower_dist)
+
+gower_mat <- as.matrix(gower_dist)
+
+# CAVERNAS MAIS SIMILARES
+cave_clean[
+  which(gower_mat == min(gower_mat[gower_mat != min(gower_mat)]),
+        arr.ind = TRUE)[1, ], ]
+# MENOS SIMILARES
+cave_clean[
+  which(gower_mat == max(gower_mat[gower_mat != max(gower_mat)]),
+        arr.ind = TRUE)[1, ], ]
+
+
+# SILHOUETTE
+sil_width <- c(NA)
+for(i in 2:10){
+  pam_fit <- pam(gower_dist,
+                 diss = TRUE,
+                 k = i)
+  sil_width[i] <- pam_fit$silinfo$avg.width
+}
+
+# Plot sihouette
+plot(1:10, sil_width,
+     xlab = "Number of clusters",
+     ylab = "Silhouette Width")
+lines(1:10, sil_width)
+
+# Foram definidos 7 grupos pelo silhouette acima
+# Clusters
+pam_fit <- pam(gower_dist, diss = TRUE, k = 7)
+
+pam_results <- cave_clean %>%
+  dplyr::select(-Cave) %>%
+  mutate(cluster = pam_fit$clustering) %>%
+  group_by(cluster) %>%
+  do(the_summary = summary(.))
+
+pam_results$the_summary
+
+# Medoids
+cave_clean[pam_fit$medoids, ]
+
+# Visual/plot
+
+tsne_obj <- Rtsne(gower_dist, is_distance = TRUE)
+
+tsne_data <- tsne_obj$Y %>%
+  data.frame() %>%
+  setNames(c("X", "Y")) %>%
+  mutate(cluster = factor(pam_fit$clustering), Cave = cave_clean$Cave )
+
+ggplot(aes(x = X, y = Y), data = tsne_data) +
+  geom_point(aes(color = cluster))
